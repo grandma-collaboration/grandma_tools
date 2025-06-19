@@ -1,2 +1,7 @@
 # grandma_tools
-Repository to track GRANDMA tools, which are independant scripts to automatize GRANDMA workflow.
+
+Collection of independent scripts and tools to automate GRANDMA workflows.
+
+## Available tools
+
+* OwnCloud service : An automatic monitoring service for new SkyPortal sources that creates structured folders on ownCloud.
