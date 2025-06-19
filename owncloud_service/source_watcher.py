@@ -1,9 +1,11 @@
 import argparse
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
 import requests
 from requests.auth import HTTPBasicAuth
+from slack_bot import setup_logger
 
 # ----- OwnCloud Configuration -----
 BASE_URL = "https://grandma-owncloud.lal.in2p3.fr/remote.php/dav/files"
@@ -106,7 +108,7 @@ def get_source_telescope_instrument_strings(source_id):
             for p in phot:
                 instrument_names.add(p["instrument_name"])
     except requests.RequestException as e:
-        print(f"Error fetching photometry for source {source_id}: {e}")
+        logger.error(f"Error fetching photometry for source {source_id}: {e}")
 
     # Spectroscopy instruments
     try:
@@ -117,14 +119,14 @@ def get_source_telescope_instrument_strings(source_id):
 
         spec = response.json().get("data")
         if not spec or not spec.get("spectra"):
-            print(
+            logger.error(
                 "No spectroscopy" if is_photometry else "No photometry and spectroscopy"
             )
         else:
             for s in spec["spectra"]:
                 instrument_names.add(s["instrument_name"])
     except requests.RequestException as e:
-        print(f"Error fetching spectra for source {source_id}: {e}")
+        logger.error(f"Error fetching spectra for source {source_id}: {e}")
 
     # Fetch telescope names and create strings
     telescope_instrument_strings = []
@@ -149,10 +151,10 @@ def get_telescope_names(instrument_name):
         if instruments:
             return instruments[0]["telescope"]["name"]
         else:
-            print(f"Instrument not found: {instrument_name}")
+            logger.error(f"Instrument not found: {instrument_name}")
             return "Unknown telescope name"
     except requests.RequestException as e:
-        print(f"Error fetching instrument '{instrument_name}': {e}")
+        logger.error(f"Error fetching instrument '{instrument_name}': {e}")
         return "Unknown telescope name"
 
 
@@ -163,35 +165,37 @@ def create_folder_on_owncloud(folder_name):
         "MKCOL", url, auth=HTTPBasicAuth(OWNCLOUD_USERNAME, OWNCLOUD_TOKEN)
     )
     if response.status_code == 201:
-        print("✅ Folder " + folder_name + " created successfully.")
+        logger.info("✅ Folder " + folder_name + " created successfully.")
         return True
     elif response.status_code == 405:
-        print("⚠️ Folder " + folder_name + " already exists.")
+        logger.warning("⚠️ Folder " + folder_name + " already exists.")
         return True
     elif response.status_code == 401:
-        print("❌ Unauthorized — check your username or password.")
+        logger.error("❌ Unauthorized — check your username or password.")
     else:
-        print(f"❌ Error {response.status_code}: {response.text}")
+        logger.error(f"❌ Error {response.status_code}: {response.text}")
     return False
 
 
 def create_owncloud_directory_structure(source_id, telescope_instrument_strings):
     """Create source and instrument directories on ownCloud."""
     if not create_folder_on_owncloud(source_id):
-        print(f"Failed to create source folder {source_id} on ownCloud.")
+        logger.error(f"Failed to create source folder {source_id} on ownCloud.")
         return
 
     for instrument in telescope_instrument_strings:
         if not create_folder_on_owncloud(source_id + "/" + instrument):
-            print(f"Failed to create instrument folder {instrument} on ownCloud.")
+            logger.error(
+                f"Failed to create instrument folder {instrument} on ownCloud."
+            )
             continue
 
 
 def main_loop(start_time):
     if not create_folder_on_owncloud(""):
-        print("Failed to create base folder on ownCloud. Exiting.")
+        logger.error("Failed to create base folder on ownCloud. Exiting.")
         return
-    print("Listening for new sources...\n")
+    logger.info("Listening for new sources...\n")
 
     last_iteration = None
     while True:
@@ -200,24 +204,25 @@ def main_loop(start_time):
             for source in new_sources:
                 try:
                     source_id = source["id"]
-                    print(f"New source detected: {source_id}")
+                    logger.info(f"New source detected: {source_id}")
                     telescope_instrument_strings = (
                         get_source_telescope_instrument_strings(source_id)
                     )
                     create_owncloud_directory_structure(
                         source_id, telescope_instrument_strings
                     )
-                    print()
                     if not USE_BASE_TELESCOPE_LIST:
                         time.sleep(0.3)  # Sleep to avoid overwhelming the server
                 except Exception as e:
-                    print(f"Error processing source: {e}")
-                    print("Waiting for 5 seconds and skipping to the next source...")
+                    logger.error(f"Error processing source: {e}")
+                    logger.info(
+                        "Waiting for 5 seconds and skipping to the next source..."
+                    )
                     time.sleep(5)
             if new_sources:
-                print("Listening for new sources...")
+                logger.info("Listening for new sources...")
         except Exception as e:
-            print(f"Error: {e}")
+            logger.error(f"Error: {e}")
         time.sleep(POLL_INTERVAL)
 
 
@@ -261,6 +266,10 @@ def parse_args():
 
 
 if __name__ == "__main__":
+    token = os.getenv("SLACK_BOT_TOKEN")
+    service_name = os.getenv("SLACK_SERVICE_NAME", "owncloud-folder-service")
+    channel = "#" + service_name
+    logger = setup_logger(service_name, token, channel)
     args = parse_args()
 
     # Override default values with command line arguments
@@ -271,7 +280,7 @@ if __name__ == "__main__":
     POLL_INTERVAL = args.interval
 
     if not API_TOKEN:
-        print("API token is required. Please provide it using --token.")
+        logger.error("API token is required. Please provide it using --token.")
         exit(1)
     header = {"Authorization": f"token {API_TOKEN}"}
 
@@ -279,7 +288,7 @@ if __name__ == "__main__":
         try:
             start_time = datetime.fromisoformat(args.start_time.replace("Z", "+00:00"))
         except ValueError:
-            print(
+            logger.error(
                 "Invalid start time format. Use ISO format, e.g. '2025-10-20T00:00:00Z'"
             )
             exit(1)
