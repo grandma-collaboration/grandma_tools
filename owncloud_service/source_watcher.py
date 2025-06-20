@@ -2,67 +2,71 @@ import argparse
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from config import get_required_env, load_env_file
 from requests.auth import HTTPBasicAuth
 from slack_bot import setup_logger
 
 # ----- OwnCloud Configuration -----
-BASE_URL = "https://grandma-owncloud.lal.in2p3.fr/remote.php/dav/files"
-OWNCLOUD_USERNAME = "OWNCLOUD_USERNAME"  # Replace with your ownCloud username
-OWNCLOUD_TOKEN = "OWNCLOUD_TOKEN"  # Replace with your ownCloud token
-OWNCLOUD_ID = (
-    "OWNCLOUD_ID"  # Replace with your ownCloud ID (from settings, WebDAV section)
+BASE_URL = os.getenv(
+    "OWNCLOUD_BASE_URL", "https://grandma-owncloud.lal.in2p3.fr/remote.php/dav/files"
 )
+OWNCLOUD_USERNAME = os.getenv("OWNCLOUD_USERNAME", "OWNCLOUD_USERNAME")
+OWNCLOUD_TOKEN = os.getenv("OWNCLOUD_TOKEN", "OWNCLOUD_TOKEN")
+OWNCLOUD_ID = os.getenv("OWNCLOUD_USER_ID", "OWNCLOUD_ID")
 # -----------------------------------
 
 # ----- Configuration -----
-INSTANCE_URL = "https://skyportal-icare.ijclab.in2p3.fr"  # Instance URL
-API_TOKEN = "API_TOKEN"  # Replace with your API token
-SAVE_PATH = (
-    "Candidates/Skyportal"  # Base directory where source folders will be created
-)
-SOURCE_TAG = ""  # Optional tag to filter sources
-POLL_INTERVAL = 60  # Polling interval in seconds
+INSTANCE_URL = os.getenv("SKYPORTAL_URL", "https://skyportal-icare.ijclab.in2p3.fr")
+API_TOKEN = os.getenv("SKYPORTAL_TOKEN", "API_TOKEN")
+SAVE_PATH = os.getenv(
+    "SAVE_PATH", "Candidates/Skyportal"
+)  # Base directory where source folders will be created
+SOURCE_TAG = os.getenv("SOURCE_TAG", "")  # Optional tag to filter sources
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))  # Polling interval in seconds
 SKYPORTAL_GROUP_IDS_FILTER = [
-    3
+    int(x.strip()) for x in os.getenv("GROUP_IDS", "3").split(",") if x.strip()
 ]  # save only sources saved to one of these skyportal groups IDs (GRANDNMA group ID is 3)
-USE_BASE_TELESCOPE_LIST = True  # Use predefined telescope list or fetch from SkyPortal
-# ----------------------------------
+USE_BASE_TELESCOPE_LIST = (
+    os.getenv("USE_BASE_TELESCOPE_LIST", "true").lower() == "true"
+)  # Use predefined telescope list or fetch from SkyPortal
 
+# Default telescope list
 TELESCOPE_LIST = [
-    "TAROT-TCA",
-    "TAROT-TRE",
-    "TAROT-TCH",
-    "Les-Makes-T60",
-    "UBAI-NT-60",
-    "UBAI-ST-60",
-    "FRAM-CTA-N",
-    "FRAM-Auger",
-    "OHP-IRIS",
-    "AbAO-T150",
-    "VIRT",
-    "TRT-SBO",
-    "TRT-GAO",
-    "TRT-SRO",
-    "TRT-CTO",
-    "TNT",
-    "ShAO-T60",
-    "AbAO-T70",
-    "GMG-2.4",
-    "Xinglong-2.16m",
-    "OST-CDK",
-    "HAO",
-    "KAO",
-    "OPD-60cm",
+    tel.strip()
+    for tel in os.getenv(
+        "TELESCOPE_LIST",
+        "TAROT-TCA,TAROT-TRE,TAROT-TCH,Les-Makes-T60,UBAI-NT-60,UBAI-ST-60,"
+        "FRAM-CTA-N,FRAM-Auger,OHP-IRIS,AbAO-T150,VIRT,TRT-SBO,TRT-GAO,"
+        "TRT-SRO,TRT-CTO,TNT,ShAO-T60,AbAO-T70,GMG-2.4,Xinglong-2.16m,"
+        "OST-CDK,HAO,KAO,OPD-60cm",
+    ).split(",")
+    if tel.strip()
 ]
 
 header = {}
 seen_sources = set()  # Track seen source ids to avoid duplication
 
 
-def get_new_sources(start_time, last_iteration):
-    """Fetch new sources from SkyPortal with an optional tag filter."""
+def get_new_sources(
+    start_time: datetime, last_iteration: Optional[datetime]
+) -> Tuple[List[Dict[str, Any]], datetime]:
+    """
+    Fetch new sources from SkyPortal with an optional tag filter.
+
+    Updates the last_iteration timestamp before making the API call to ensure
+    no sources are missed between polling cycles. Only returns sources that
+    haven't been seen before (tracked in the global seen_sources set).
+
+    Args:
+        start_time: Initial start time for fetching sources
+        last_iteration: Timestamp of last successful fetch, or None for first run
+
+    Returns:
+        Tuple of (list of new source dictionaries, updated last iteration timestamp)
+    """
     since = last_iteration if last_iteration else start_time
 
     # Update last iteration before fetching new sources to avoid missing any sources
@@ -87,8 +91,20 @@ def get_new_sources(start_time, last_iteration):
     return new_sources, last_iteration
 
 
-def get_source_telescope_instrument_strings(source_id):
-    """Fetch instrument and telescope names for a given source and return combined strings."""
+def get_source_telescope_instrument_strings(source_id: str) -> List[str]:
+    """
+    Fetch instrument and telescope names for a given source and return combined strings.
+
+    If USE_BASE_TELESCOPE_LIST is True, returns the predefined telescope list.
+    Otherwise, queries SkyPortal API for photometry and spectroscopy data to get
+    actual instrument names, then resolves telescope names via the instrument API.
+
+    Args:
+        source_id: SkyPortal source id
+
+    Returns:
+        List of telescope-instrument combination strings or predefined telescope list
+    """
     if USE_BASE_TELESCOPE_LIST:
         return TELESCOPE_LIST
 
@@ -137,8 +153,19 @@ def get_source_telescope_instrument_strings(source_id):
     return telescope_instrument_strings
 
 
-def get_telescope_names(instrument_name):
-    """Fetch telescope name from the instrument name."""
+def get_telescope_names(instrument_name: str) -> str:
+    """
+    Fetch telescope name from the instrument name via SkyPortal API.
+
+    Queries the SkyPortal instrument API to resolve the telescope name
+    associated with a given instrument name.
+
+    Args:
+        instrument_name: Name of the instrument
+
+    Returns:
+        Telescope name associated with the instrument, or "Unknown telescope name" if not found
+    """
     try:
         response = requests.get(
             f"{INSTANCE_URL}/api/instrument",
@@ -158,8 +185,16 @@ def get_telescope_names(instrument_name):
         return "Unknown telescope name"
 
 
-def create_folder_on_owncloud(folder_name):
-    """Create a folder on ownCloud."""
+def create_folder_on_owncloud(folder_name: str) -> bool:
+    """
+    Create a folder on ownCloud.
+
+    Args:
+        folder_name: Name or path of the folder to create (relative to SAVE_PATH)
+
+    Returns:
+        True if folder was created successfully or already exists, False otherwise
+    """
     url = f"{BASE_URL}/{OWNCLOUD_ID}/{SAVE_PATH}/{folder_name}"
     response = requests.request(
         "MKCOL", url, auth=HTTPBasicAuth(OWNCLOUD_USERNAME, OWNCLOUD_TOKEN)
@@ -177,8 +212,20 @@ def create_folder_on_owncloud(folder_name):
     return False
 
 
-def create_owncloud_directory_structure(source_id, telescope_instrument_strings):
-    """Create source and instrument directories on ownCloud."""
+def create_owncloud_directory_structure(
+    source_id: str, telescope_instrument_strings: List[str]
+) -> None:
+    """
+    Create source and instrument directories on ownCloud.
+
+    Creates a hierarchical folder structure with the source ID as the main folder
+    and telescope-instrument combinations as subfolders. Continues processing
+    remaining instruments even if individual folder creation fails.
+
+    Args:
+        source_id: SkyPortal source id
+        telescope_instrument_strings: List of telescope-instrument combinations for subfolders
+    """
     if not create_folder_on_owncloud(source_id):
         logger.error(f"Failed to create source folder {source_id} on ownCloud.")
         return
@@ -191,7 +238,16 @@ def create_owncloud_directory_structure(source_id, telescope_instrument_strings)
             continue
 
 
-def main_loop(start_time):
+def main_loop(start_time: datetime) -> None:
+    """
+    Main monitoring loop that watches for new sources and creates folders.
+
+    Continuously polls SkyPortal for new sources and creates corresponding folder
+    structures on ownCloud.
+
+    Args:
+        start_time: Datetime to start monitoring from
+    """
     if not create_folder_on_owncloud(""):
         logger.error("Failed to create base folder on ownCloud. Exiting.")
         return
@@ -226,70 +282,64 @@ def main_loop(start_time):
         time.sleep(POLL_INTERVAL)
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command line arguments.
+
+    Returns:
+        Parsed command line arguments namespace
+    """
     parser = argparse.ArgumentParser(
         description=(
             "SkyPortal source watcher\nAuto-create folders in ownCloud for new sources.\n\n"
             "Example:\n"
+            "  python source_watcher.py --env-file .env.local\n"
             "  python source_watcher.py --start-time '2025-05-15T00:00:00Z'\n\n"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
     parser.add_argument(
-        "--instance",
+        "--env-file",
         type=str,
-        default=INSTANCE_URL,
-        help="SkyPortal instance URL (default: %(default)s)",
-    )
-    parser.add_argument("--token", type=str, help="API token")
-    parser.add_argument(
-        "--path",
-        type=str,
-        default=SAVE_PATH,
-        help="Base directory where source folders will be created (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--interval",
-        type=int,
-        default=POLL_INTERVAL,
-        help="Polling interval in seconds (default: %(default)s)",
-    )
-    # parser.add_argument("--tag", type=str, default=SOURCE_TAG,
-    #                     help="Source tag to filter (default: %(default)s)")
-    parser.add_argument(
-        "--start-time",
-        type=str,
-        help="Start UTC time for fetching new sources in ISO format, e.g. '2025-05-15T00:00:00Z' (default: 1 day ago)",
+        default=".env",
+        help="Path to .env configuration file (default: .env)",
     )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
-    token = os.getenv("SLACK_BOT_TOKEN")
+    # Parse arguments and load environment
+    args = parse_args()
+    load_env_file(args.env_file)
+
+    # Setup logger
+    slack_token = os.getenv("SLACK_BOT_TOKEN")
     service_name = os.getenv("SLACK_SERVICE_NAME", "owncloud-folder-service")
     channel = "#" + service_name
-    logger = setup_logger(service_name, token, channel)
-    args = parse_args()
+    logger = setup_logger(service_name, slack_token, channel)
 
-    # Override default values with command line arguments
-    INSTANCE_URL = args.instance
-    API_TOKEN = args.token or API_TOKEN
-    SAVE_PATH = args.path
-    # SOURCE_TAG = args.tag
-    POLL_INTERVAL = args.interval
-
-    if not API_TOKEN:
-        logger.error("API token is required. Please provide it using --token.")
+    try:
+        OWNCLOUD_USERNAME = get_required_env("OWNCLOUD_USERNAME")
+        OWNCLOUD_TOKEN = get_required_env("OWNCLOUD_TOKEN")
+        OWNCLOUD_ID = get_required_env("OWNCLOUD_USER_ID")
+        API_TOKEN = get_required_env("SKYPORTAL_TOKEN")
+    except ValueError as e:
+        logger.error(f"Configuration error: {e}")
+        logger.error(
+            "Required variables: OWNCLOUD_USERNAME, OWNCLOUD_TOKEN, OWNCLOUD_USER_ID, SKYPORTAL_TOKEN"
+        )
         exit(1)
     header = {"Authorization": f"token {API_TOKEN}"}
 
-    if args.start_time:
+    # Parse start time from environment variable
+    start_time_str = os.getenv("START_TIME")
+    if start_time_str:
         try:
-            start_time = datetime.fromisoformat(args.start_time.replace("Z", "+00:00"))
+            start_time = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
         except ValueError:
             logger.error(
-                "Invalid start time format. Use ISO format, e.g. '2025-10-20T00:00:00Z'"
+                "Invalid START_TIME format. Use ISO format, e.g. '2025-10-20T00:00:00Z'"
             )
             exit(1)
     else:

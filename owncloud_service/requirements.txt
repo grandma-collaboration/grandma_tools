@@ -1,1 +1,3 @@
 slack_sdk
+requests
+python-dotenv
