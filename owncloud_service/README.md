@@ -10,29 +10,37 @@ An automatic monitoring service for new SkyPortal sources that creates structure
 * Slack notifications: Alerts for warnings and errors
 * Group filtering: Only processes sources from specified groups
 * Duplicate handling: Avoids reprocessing the same sources
+* Environment-based configuration: Uses .env files for easy configuration management
 
 ## Dependencies
 
 Tool dependencies are available in the `requirements.txt` file.
-For now, the only dependencie is the package `slack-sdk`
+Required packages:
+* `slack-sdk`
+* `requests`
+* `python-dotenv`
 
 ## Configuration 
 
+Create a .env file (or specify a custom path) with the following variables (an example is available in the file .env.default):
 
 1. ownCloud Configuration  
 
-Modify these constants in source_watcher.py:
+```bash
+OWNCLOUD_USERNAME="your_username" # required
+OWNCLOUD_TOKEN="your_owncloud_token" # required
+OWNCLOUD_USER_ID="your_owncloud_user_id" # required
+OWNCLOUD_BASE_URL="https://your-owncloud-instance.com/remote.php/dav/files" # optional, default is Owncloud Grandma url
+SAVE_PATH="Candidates/Skyportal" # optional
 
-```python
-OWNCLOUD_USERNAME = "your_username"
-OWNCLOUD_TOKEN = "your_owncloud_token"
-OWNCLOUD_ID = ("your_owncloud_id") 
 ```
 
 2. Skyportal configuration  
 
-```python
-API_TOKEN = "your_skyportal_api_token"
+```bash
+SKYPORTAL_TOKEN="your_skyportal_api_token" # required
+SKYPORTAL_URL="https://your-skyportal-instance.com" # optional, default is Icare instance of Skyportal url
+SOURCE_TAG=""  # optional
 ```
 
 3. Slack Configuration (optional)
@@ -41,8 +49,8 @@ API_TOKEN = "your_skyportal_api_token"
 Environment variables:
 
 ```bash
-export SLACK_BOT_TOKEN="xoxb-your-bot-token"
-export SLACK_SERVICE_NAME="owncloud-folder-service"  # ie channel name will be : "#" + SLACK_SERVICE_NAME
+SLACK_BOT_TOKEN="xoxb-your-bot-token" # optional
+SLACK_SERVICE_NAME="owncloud-folder-service"  # optional, ie channel name will be : "#" + SLACK_SERVICE_NAME
 ```
 
 Bot setup:
@@ -56,48 +64,54 @@ Bot setup:
 ## Launch
 
 ```bash
-python source_watcher.py --token YOUR_API_TOKEN
+python source_watcher.py # use default env file
 ```
 
 ```bash
-python source_watcher.py \
-  --token "your_api_token" \
-  --instance "https://your-skyportal.com" \
-  --path "Target/Folder" \
-  --interval 30 \
-  --start-time "2025-06-01T00:00:00Z"
+python source_watcher.py --env-file path/to/your/env/file/.env
 ```
-
-
-### Options
-
-|    Option    |           Description          |        Default       |
-|:------------:|:------------------------------:|:--------------------:|
-| --token      | SkyPortal API token (required) | -                    |
-| --instance   | SkyPortal instance URL         | Value in code        |
-| --path       | Base path in ownCloud          | Candidates/Skyportal |
-| --interval   | Polling interval (seconds)     | 60                   |
-| --start-time | Start time (ISO format)        | 1 day ago            |
 
 ## Advanced configuration
 
 ### Modifying the telescope list
 
-Edit the `TELESCOPE_LIST` constant to add/remove telescopes:
+The service supports two modes for handling telescopes and instruments:
 
-```python
-TELESCOPE_LIST = [
-    "TAROT-TCA",
-    "TAROT-TRE", 
-    "YourNewTelescope",
-    # ...
-]
+#### Predefined List Mode
+
+Uses the telescope list defined in `TELESCOPE_LIST`
+Faster processing, no API calls needed.
+
+```bash
+USE_BASE_TELESCOPE_LIST="true"
+TELESCOPE_LIST="TAROT-TCA,TAROT-TRE,YourNewTelescope, ..."
+```
+
+#### Dynamic Mode
+
+Fetches actual telescope and instrument names from SkyPortal API.
+Creates folders based on real photometry and spectroscopy data.
+More accurate but requires additional API calls.
+
+```bash
+USE_BASE_TELESCOPE_LIST="false"
 ```
 
 ### SkyPortal group filtering
 
-Modify `SKYPORTAL_GROUP_IDS_FILTER` to monitor other groups:
+Modify `GROUP_IDS` to monitor other groups:
 
-```python
-SKYPORTAL_GROUP_IDS_FILTER = [1, 2, 3]
+```bash
+GROUP_IDS=1,2,3
 ```
+
+### Monitoring Settings
+You can specify when to start monitoring sources:
+
+Via environment variable: `START_TIME="2025-06-01T00:00:00Z"`  
+If not specified, defaults to 24 hours ago from startup.
+
+You can also specify the poll internal between the api call to find new sources:
+
+Via environment variable: `POLL_INTERVAL="60"`  
+If not specified, defaults to 60 seconds between each api call.
