@@ -16,7 +16,7 @@ def load_env_file(env_file_path: str) -> None:
     """
     env_path = Path(env_file_path)
     if env_path.exists():
-        load_dotenv(env_path, override=False)
+        load_dotenv(env_path, override=True)
         logger.info(f"Loaded configuration from: {env_file_path}")
     else:
         logger.warning(f".env file not found at {env_file_path}")

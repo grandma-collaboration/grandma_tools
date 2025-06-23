@@ -1,3 +1,4 @@
+import datetime
 import logging
 from typing import Optional
 
@@ -34,11 +35,9 @@ class SlackHandler(logging.Handler):
             record: The log record to send to Slack
         """
         try:
-            emoji = "⚠️" if record.levelname == "WARNING" else "🔴"
-
             self.client.chat_postMessage(
                 channel=self.channel,
-                text=f"{emoji} *{record.levelname}*: {self.format(record)}",
+                text=f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - *{record.levelname}*: {self.format(record)}",
             )
         except SlackApiError as e:
             self.logger.error(

@@ -9,17 +9,8 @@ from config import get_required_env, load_env_file
 from requests.auth import HTTPBasicAuth
 from slack_bot import setup_logger
 
-# ----- OwnCloud Configuration -----
-BASE_URL = os.getenv(
-    "OWNCLOUD_BASE_URL", "https://grandma-owncloud.lal.in2p3.fr/remote.php/dav/files"
-)
-OWNCLOUD_USERNAME = os.getenv("OWNCLOUD_USERNAME", "OWNCLOUD_USERNAME")
-OWNCLOUD_TOKEN = os.getenv("OWNCLOUD_TOKEN", "OWNCLOUD_TOKEN")
-OWNCLOUD_ID = os.getenv("OWNCLOUD_USER_ID", "OWNCLOUD_ID")
-# -----------------------------------
-
 # ----- Configuration -----
-INSTANCE_URL = os.getenv("SKYPORTAL_URL", "https://skyportal-icare.ijclab.in2p3.fr")
+
 API_TOKEN = os.getenv("SKYPORTAL_TOKEN", "API_TOKEN")
 SAVE_PATH = os.getenv(
     "SAVE_PATH", "Candidates/Skyportal"
@@ -28,7 +19,7 @@ SOURCE_TAG = os.getenv("SOURCE_TAG", "")  # Optional tag to filter sources
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))  # Polling interval in seconds
 SKYPORTAL_GROUP_IDS_FILTER = [
     int(x.strip()) for x in os.getenv("GROUP_IDS", "3").split(",") if x.strip()
-]  # save only sources saved to one of these skyportal groups IDs (GRANDNMA group ID is 3)
+]  # save only sources saved to one of these skyportal groups IDs (GRANDNMA group ID is 3 for ICARE)
 USE_BASE_TELESCOPE_LIST = (
     os.getenv("USE_BASE_TELESCOPE_LIST", "true").lower() == "true"
 )  # Use predefined telescope list or fetch from SkyPortal
@@ -185,17 +176,47 @@ def get_telescope_names(instrument_name: str) -> str:
         return "Unknown telescope name"
 
 
-def create_folder_on_owncloud(folder_name: str) -> bool:
+def create_base_folder_on_owncloud() -> bool:
+    """Ensure SAVE_PATH directory structure exists."""
+    logger.info(f"Checking if SAVE_PATH exists: {SAVE_PATH}")
+
+    check_url = f"{BASE_URL}/{OWNCLOUD_USER_ID}/{SAVE_PATH}/"
+    response = requests.request(
+        "PROPFIND", check_url, auth=HTTPBasicAuth(OWNCLOUD_USERNAME, OWNCLOUD_TOKEN)
+    )
+
+    if response.status_code in [200, 207]:
+        logger.info(f"SAVE_PATH already exists: {SAVE_PATH}")
+        return True
+
+    logger.info(f"Creating SAVE_PATH hierarchy: {SAVE_PATH}")
+    parts = SAVE_PATH.split("/")
+    current_path = ""
+    logger.info(parts)
+    for part in parts:
+        current_path = f"{current_path}/{part}" if current_path else part
+
+        if not create_folder_on_owncloud(
+            f"{BASE_URL}/{OWNCLOUD_USER_ID}/", current_path
+        ):
+            return False
+
+    logger.info(f"SAVE_PATH ready: {SAVE_PATH}")
+    return True
+
+
+def create_folder_on_owncloud(base_url: str, folder_name: str) -> bool:
     """
     Create a folder on ownCloud.
 
     Args:
+        base_url: Path where to create the new folder
         folder_name: Name or path of the folder to create (relative to SAVE_PATH)
 
     Returns:
         True if folder was created successfully or already exists, False otherwise
     """
-    url = f"{BASE_URL}/{OWNCLOUD_ID}/{SAVE_PATH}/{folder_name}"
+    url = f"{base_url}/{folder_name}"
     response = requests.request(
         "MKCOL", url, auth=HTTPBasicAuth(OWNCLOUD_USERNAME, OWNCLOUD_TOKEN)
     )
@@ -226,12 +247,16 @@ def create_owncloud_directory_structure(
         source_id: SkyPortal source id
         telescope_instrument_strings: List of telescope-instrument combinations for subfolders
     """
-    if not create_folder_on_owncloud(source_id):
+    if not create_folder_on_owncloud(
+        f"{BASE_URL}/{OWNCLOUD_USER_ID}/{SAVE_PATH}", source_id
+    ):
         logger.error(f"Failed to create source folder {source_id} on ownCloud.")
         return
 
     for instrument in telescope_instrument_strings:
-        if not create_folder_on_owncloud(source_id + "/" + instrument):
+        if not create_folder_on_owncloud(
+            f"{BASE_URL}/{OWNCLOUD_USER_ID}/{SAVE_PATH}", source_id + "/" + instrument
+        ):
             logger.error(
                 f"Failed to create instrument folder {instrument} on ownCloud."
             )
@@ -248,9 +273,11 @@ def main_loop(start_time: datetime) -> None:
     Args:
         start_time: Datetime to start monitoring from
     """
-    if not create_folder_on_owncloud(""):
-        logger.error("Failed to create base folder on ownCloud. Exiting.")
-        return
+    try:
+        create_base_folder_on_owncloud()
+    except Exception as e:
+        logger.error(f"Error during base folder creation: {e}")
+
     logger.info("Listening for new sources...\n")
 
     last_iteration = None
@@ -320,9 +347,16 @@ if __name__ == "__main__":
     logger = setup_logger(service_name, slack_token, channel)
 
     try:
+        BASE_URL = os.getenv(
+            "OWNCLOUD_BASE_URL",
+            "https://grandma-owncloud.lal.in2p3.fr/remote.php/dav/files",
+        )
         OWNCLOUD_USERNAME = get_required_env("OWNCLOUD_USERNAME")
         OWNCLOUD_TOKEN = get_required_env("OWNCLOUD_TOKEN")
-        OWNCLOUD_ID = get_required_env("OWNCLOUD_USER_ID")
+        OWNCLOUD_USER_ID = get_required_env("OWNCLOUD_USER_ID")
+        INSTANCE_URL = os.getenv(
+            "SKYPORTAL_URL", "https://skyportal-icare.ijclab.in2p3.fr"
+        )
         API_TOKEN = get_required_env("SKYPORTAL_TOKEN")
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
