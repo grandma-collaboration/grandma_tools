@@ -50,7 +50,7 @@ jobs:
       run: |
         cd owncloud_service
         echo "Starting services..."
-        docker compose up
+        docker compose up -d
         
     - name: Initialize SkyPortal database
       run: |
@@ -133,6 +133,5 @@ jobs:
       if: always()
       run: |
         echo "Cleaning up services..."
-        cd skyportal && docker compose down || true
-        cd owncloud_service && docker compose down || true
+        cd owncloud_service && docker compose down -v || true
         echo "Cleanup completed"
