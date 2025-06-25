@@ -67,7 +67,7 @@ jobs:
       run: |
         cd skyportal
         echo "Extracting SkyPortal token..."
-        SKYPORTAL_TOKEN=$(docker exec skyportal-web-1 cat .tokens.yaml | grep -A1 "INITIAL_ADMIN:" | tail -n1 | sed 's/^[[:space:]]*//' | sed 's/^-[[:space:]]*//')
+        SKYPORTAL_TOKEN=$(docker exec skyportal-web cat .tokens.yaml | grep -A1 "INITIAL_ADMIN:" | tail -n1 | sed 's/^[[:space:]]*//' | sed 's/^-[[:space:]]*//')
         
         if [ -z "$SKYPORTAL_TOKEN" ]; then
           echo "Failed to extract SkyPortal token"
@@ -125,7 +125,7 @@ jobs:
         echo "=== OwnCloud logs ==="
         docker logs owncloud_server || true
         echo "=== SkyPortal web logs ==="
-        docker logs skyportal-web-1 || true
+        docker logs skyportal-web || true
         echo "=== Docker containers status ==="
         docker ps -a
           
