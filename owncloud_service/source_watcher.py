@@ -9,34 +9,6 @@ from config import get_required_env, load_env_file
 from requests.auth import HTTPBasicAuth
 from slack_bot import setup_logger
 
-# ----- Configuration -----
-
-API_TOKEN = os.getenv("SKYPORTAL_TOKEN", "API_TOKEN")
-SAVE_PATH = os.getenv(
-    "SAVE_PATH", "Candidates/Skyportal"
-)  # Base directory where source folders will be created
-SOURCE_TAG = os.getenv("SOURCE_TAG", "")  # Optional tag to filter sources
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))  # Polling interval in seconds
-SKYPORTAL_GROUP_IDS_FILTER = [
-    int(x.strip()) for x in os.getenv("GROUP_IDS", "3").split(",") if x.strip()
-]  # save only sources saved to one of these skyportal groups IDs (GRANDNMA group ID is 3 for ICARE)
-USE_BASE_TELESCOPE_LIST = (
-    os.getenv("USE_BASE_TELESCOPE_LIST", "true").lower() == "true"
-)  # Use predefined telescope list or fetch from SkyPortal
-
-# Default telescope list
-TELESCOPE_LIST = [
-    tel.strip()
-    for tel in os.getenv(
-        "TELESCOPE_LIST",
-        "TAROT-TCA,TAROT-TRE,TAROT-TCH,Les-Makes-T60,UBAI-NT-60,UBAI-ST-60,"
-        "FRAM-CTA-N,FRAM-Auger,OHP-IRIS,AbAO-T150,VIRT,TRT-SBO,TRT-GAO,"
-        "TRT-SRO,TRT-CTO,TNT,ShAO-T60,AbAO-T70,GMG-2.4,Xinglong-2.16m,"
-        "OST-CDK,HAO,KAO,OPD-60cm",
-    ).split(",")
-    if tel.strip()
-]
-
 header = {}
 seen_sources = set()  # Track seen source ids to avoid duplication
 
@@ -358,6 +330,30 @@ if __name__ == "__main__":
             "SKYPORTAL_URL", "https://skyportal-icare.ijclab.in2p3.fr"
         )
         API_TOKEN = get_required_env("SKYPORTAL_TOKEN")
+
+        SAVE_PATH = os.getenv("SAVE_PATH", "Candidates/Skyportal")
+        SOURCE_TAG = os.getenv("SOURCE_TAG", "")
+        POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))
+        SKYPORTAL_GROUP_IDS_FILTER = [
+            int(x.strip()) for x in os.getenv("GROUP_IDS", "3").split(",") if x.strip()
+        ]
+        USE_BASE_TELESCOPE_LIST = (
+            os.getenv("USE_BASE_TELESCOPE_LIST", "true").lower() == "true"
+        )
+
+        # Default telescope list
+        TELESCOPE_LIST = [
+            tel.strip()
+            for tel in os.getenv(
+                "TELESCOPE_LIST",
+                "TAROT-TCA,TAROT-TRE,TAROT-TCH,Les-Makes-T60,UBAI-NT-60,UBAI-ST-60,"
+                "FRAM-CTA-N,FRAM-Auger,OHP-IRIS,AbAO-T150,VIRT,TRT-SBO,TRT-GAO,"
+                "TRT-SRO,TRT-CTO,TNT,ShAO-T60,AbAO-T70,GMG-2.4,Xinglong-2.16m,"
+                "OST-CDK,HAO,KAO,OPD-60cm",
+            ).split(",")
+            if tel.strip()
+        ]
+
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
         logger.error(
