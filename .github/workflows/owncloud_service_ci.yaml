@@ -1,0 +1,138 @@
+name: GRANDMA Tools CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+env:
+  OWNCLOUD_BASE_URL: "http://localhost:8080/remote.php/dav/files"
+  OWNCLOUD_USERNAME: "admin"
+  OWNCLOUD_TOKEN: "admin"
+  OWNCLOUD_USER_ID: "admin"
+
+  SAVE_PATH: "Candidates/Skyportal"
+  POLL_INTERVAL: "10"
+  GROUP_IDS: "1"
+  SOURCE_TAG: ""
+  USE_BASE_TELESCOPE_LIST: "true"
+  TELESCOPE_LIST: "TEST-TEL1,TEST-TEL2"
+  START_TIME: "2017-06-01T00:00:00Z"
+  SLACK_BOT_TOKEN: ""
+  SLACK_SERVICE_NAME: "owncloud-folder-service-test"
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Checkout SkyPortal
+      uses: actions/checkout@v4
+      with:
+        repository: skyportal/skyportal
+        path: skyportal
+        # token: ${{ secrets.SKYPORTAL_ACCESS_TOKEN }}  # Seulement si repo privé
+        
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build SkyPortal Docker images
+      run: |
+        cd skyportal
+        echo "Building SkyPortal Docker images..."
+        make docker-local
+        echo "SkyPortal images built successfully"
+        
+    - name: Start all services
+      run: |
+        cd owncloud_service
+        echo "Starting services..."
+        docker-compose up -d
+        
+    - name: Initialize SkyPortal database
+      run: |
+        cd skyportal
+        echo "Creating database tables..."
+        docker exec skyportal-web bash -c 'source /skyportal_env/bin/activate && FLAGS="--config=config.yaml" make db_create_tables'
+        
+        echo "Loading demo data..."
+        docker exec skyportal-web bash -c 'source /skyportal_env/bin/activate && FLAGS="--create_tables --config=config.yaml" make load_demo_data'
+        echo "Database initialized successfully"
+        
+    - name: Extract SkyPortal token
+      id: extract_token
+      run: |
+        cd skyportal
+        echo "Extracting SkyPortal token..."
+        SKYPORTAL_TOKEN=$(docker exec skyportal-web-1 cat .tokens.yaml | grep -A1 "INITIAL_ADMIN:" | tail -n1 | sed 's/^[[:space:]]*//' | sed 's/^-[[:space:]]*//')
+        
+        if [ -z "$SKYPORTAL_TOKEN" ]; then
+          echo "Failed to extract SkyPortal token"
+          exit 1
+        fi
+        
+        echo "SKYPORTAL_TOKEN=$" >> $GITHUB_OUTPUT
+        
+    - name: Create test environment file
+      run: |
+        cd owncloud_service
+        echo "Creating test environment file."
+        cat > .env << EOF
+        # OwnCloud Configuration
+        OWNCLOUD_BASE_URL=${{ env.OWNCLOUD_BASE_URL }}
+        OWNCLOUD_USERNAME=${{ env.OWNCLOUD_USERNAME }}
+        OWNCLOUD_TOKEN=${{ env.OWNCLOUD_TOKEN }}
+        OWNCLOUD_USER_ID=${{ env.OWNCLOUD_USER_ID }}
+        
+        # SkyPortal Configuration
+        SKYPORTAL_URL=http://localhost:9000
+        SKYPORTAL_TOKEN=${{ steps.extract_token.outputs.SKYPORTAL_TOKEN }}
+        
+        # Application Settings
+        SAVE_PATH=${{ env.SAVE_PATH }}
+        POLL_INTERVAL=${{ env.POLL_INTERVAL }}
+        GROUP_IDS=${{ env.GROUP_IDS }}
+        SOURCE_TAG=${{ env.SOURCE_TAG }}
+        USE_BASE_TELESCOPE_LIST=${{ env.USE_BASE_TELESCOPE_LIST }}
+        TELESCOPE_LIST=${{ env.TELESCOPE_LIST }}
+        START_TIME=${{ env.START_TIME }}
+        
+        # Slack Configuration
+        SLACK_BOT_TOKEN=${{ env.SLACK_BOT_TOKEN }}
+        SLACK_SERVICE_NAME=${{ env.SLACK_SERVICE_NAME }}
+        EOF
+        echo "Environment file created"
+        
+    - name: Install python dependencies
+      run: |
+        cd owncloud_service
+        echo "Installing source watcher dependencies."
+        pip install -r requirements.txt
+        
+    - name: Test source watcher startup
+      run: |
+        cd owncloud_service
+        echo "Testing source watcher startup (30 seconds)..."
+        python source_watcher.py --env-file .env
+        
+    - name: Show container logs (on failure)
+      if: failure()
+      run: |
+        echo "Container logs for debugging:"
+        echo "=== OwnCloud logs ==="
+        docker logs owncloud_server || true
+        echo "=== SkyPortal web logs ==="
+        docker logs skyportal-web-1 || true
+        echo "=== Docker containers status ==="
+        docker ps -a
+          
+    - name: Cleanup
+      if: always()
+      run: |
+        echo "Cleaning up services..."
+        cd skyportal && docker-compose down -v || true
+        cd owncloud_service && docker-compose down -v || true
+        echo "Cleanup completed"

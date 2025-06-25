@@ -7,6 +7,9 @@ volumes:
     driver: local
   redis:
     driver: local
+  dbdata:
+  thumbnails:
+  persistentdata:
 
 services:
   owncloud:
@@ -70,3 +73,28 @@ services:
       retries: 5
     volumes:
       - redis:/data
+
+  web:
+    image: skyportal/web
+    container_name: skyportal-web
+    ports:
+      - "9000:5000"
+      - "9001:5001"
+    volumes:
+      # allow the data files to be mounted across containers
+      # if need be with the :z flag
+      # cf. https://stackoverflow.com/a/35222815
+      - thumbnails:/skyportal/static/thumbnails:z
+      - persistentdata:/skyportal/persistentdata:z
+
+  db:
+    image: postgres:16
+    container_name: postgres16
+    environment:
+      POSTGRES_USER: skyportal
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: skyportal
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ./data/dbdata:/var/lib/postgresql/data:z
+    restart: on-failure:3
