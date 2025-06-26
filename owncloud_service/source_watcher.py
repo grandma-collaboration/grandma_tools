@@ -329,7 +329,7 @@ if __name__ == "__main__":
         INSTANCE_URL = os.getenv(
             "SKYPORTAL_URL", "https://skyportal-icare.ijclab.in2p3.fr"
         )
-        API_TOKEN = get_required_env("SKYPORTAL_TOKEN")
+        SKYPORTAL_TOKEN = get_required_env("SKYPORTAL_TOKEN")
 
         SAVE_PATH = os.getenv("SAVE_PATH", "Candidates/Skyportal")
         SOURCE_TAG = os.getenv("SOURCE_TAG", "")
@@ -360,7 +360,7 @@ if __name__ == "__main__":
             "Required variables: OWNCLOUD_USERNAME, OWNCLOUD_TOKEN, OWNCLOUD_USER_ID, SKYPORTAL_TOKEN"
         )
         exit(1)
-    header = {"Authorization": f"token {API_TOKEN}"}
+    header = {"Authorization": f"token {SKYPORTAL_TOKEN}"}
 
     # Parse start time from environment variable
     start_time_str = os.getenv("START_TIME")
