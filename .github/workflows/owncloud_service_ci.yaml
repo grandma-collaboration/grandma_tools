@@ -67,14 +67,14 @@ jobs:
       run: |
         cd skyportal
         echo "Extracting SkyPortal token..."
-        SKYPORTAL_TOKEN=$(docker exec skyportal-web cat .tokens.yaml | grep "INITIAL_ADMIN:" | cut -d':' -f2 | sed 's/^[[:space:]]*//')
+        API_TOKEN=$(docker exec skyportal-web cat .tokens.yaml | grep "INITIAL_ADMIN:" | cut -d':' -f2 | sed 's/^[[:space:]]*//')
         
-        if [ -z "$SKYPORTAL_TOKEN" ]; then
+        if [ -z "$API_TOKEN" ]; then
           echo "Failed to extract SkyPortal token"
           exit 1
         fi
         
-        echo "SKYPORTAL_TOKEN=$" >> $GITHUB_OUTPUT
+        echo "API_TOKEN=$" >> $GITHUB_OUTPUT
         
     - name: Create test environment file
       run: |
@@ -89,7 +89,7 @@ jobs:
         
         # SkyPortal Configuration
         SKYPORTAL_URL=http://localhost:9000
-        SKYPORTAL_TOKEN=${{ steps.extract_token.outputs.SKYPORTAL_TOKEN }}
+        API_TOKEN=${{ steps.extract_token.outputs.API_TOKEN }}
         
         # Application Settings
         SAVE_PATH=${{ env.SAVE_PATH }}
@@ -106,8 +106,8 @@ jobs:
         EOF
         echo "Environment file created"
         echo ">>>> Verifying environment file content:"
-        echo "SKYPORTAL_URL=$(grep SKYPORTAL_URL .env.test)"
-        echo "SKYPORTAL_TOKEN=$(grep SKYPORTAL_TOKEN .env.test)"
+        echo "SKYPORTAL_URL=$(grep SKYPORTAL_URL .env)"
+        echo "API_TOKEN=$(grep API_TOKEN .env)"
         
     - name: Install python dependencies
       run: |
