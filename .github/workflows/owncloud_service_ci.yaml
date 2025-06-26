@@ -67,7 +67,7 @@ jobs:
       run: |
         cd skyportal
         echo "Extracting SkyPortal token..."
-        SKYPORTAL_TOKEN=$(docker exec skyportal-web cat .tokens.yaml | grep -A1 "INITIAL_ADMIN:" | tail -n1 | sed 's/^[[:space:]]*//' | sed 's/^-[[:space:]]*//')
+        SKYPORTAL_TOKEN=$(docker exec skyportal-web cat .tokens.yaml | grep "INITIAL_ADMIN:" | cut -d':' -f2 | sed 's/^[[:space:]]*//')
         
         if [ -z "$SKYPORTAL_TOKEN" ]; then
           echo "Failed to extract SkyPortal token"
@@ -105,6 +105,9 @@ jobs:
         SLACK_SERVICE_NAME=${{ env.SLACK_SERVICE_NAME }}
         EOF
         echo "Environment file created"
+        echo ">>>> Verifying environment file content:"
+        echo "SKYPORTAL_URL=$(grep SKYPORTAL_URL .env.test)"
+        echo "SKYPORTAL_TOKEN=$(grep SKYPORTAL_TOKEN .env.test)"
         
     - name: Install python dependencies
       run: |
