@@ -67,7 +67,7 @@ jobs:
       run: |
         cd skyportal
         echo "Extracting SkyPortal token..."
-        SKYPORTAL_TOKEN=$(docker exec skyportal-web-1 cat .tokens.yaml | grep "INITIAL_ADMIN:" | cut -d':' -f2 | tr -d ' ')
+        SKYPORTAL_TOKEN=$(docker exec skyportal-web cat .tokens.yaml | grep "INITIAL_ADMIN:" | cut -d':' -f2 | tr -d ' ')
         echo $SKYPORTAL_TOKEN
 
         
