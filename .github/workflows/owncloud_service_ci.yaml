@@ -34,7 +34,6 @@ jobs:
       with:
         repository: skyportal/skyportal
         path: skyportal
-        # token: ${{ secrets.SKYPORTAL_ACCESS_TOKEN }}  # Seulement si repo privé
         
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
