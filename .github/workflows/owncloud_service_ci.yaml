@@ -107,9 +107,6 @@ jobs:
         SLACK_SERVICE_NAME=${{ env.SLACK_SERVICE_NAME }}
         EOF
         echo "Environment file created"
-        echo ">>>> Verifying environment file content:"
-        echo "SKYPORTAL_URL=$(grep SKYPORTAL_URL .env)"
-        echo "SKYPORTAL_TOKEN=$(grep SKYPORTAL_TOKEN .env)"
         
     - name: Install python dependencies
       run: |
