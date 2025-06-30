@@ -120,16 +120,62 @@ jobs:
     - name: Test source watcher startup
       run: |
         cd owncloud_service
-        echo "Testing source watcher startup (30 seconds timeout)..."
-        timeout 30 python source_watcher.py --env-file .env || {
-          exit_code=$?
-          if [ $exit_code -eq 124 ]; then
-            echo "Source watcher ran for 30 seconds without errors (timeout expected)"
-          else
-            echo "Source watcher failed with exit code $exit_code"
+        echo "Testing source watcher startup (waiting for 2nd 'Listening for new sources...' or 5min timeout)..."
+        
+        python source_watcher.py --env-file .env > watcher.log 2>&1 &
+        WATCHER_PID=$!
+        
+        echo "Source watcher started with PID: $WATCHER_PID"
+        
+        TIMEOUT=300
+        ELAPSED=0
+        LISTENING_COUNT=0
+        SUCCESS=false
+        
+        while [ $ELAPSED -lt $TIMEOUT ]; do
+          if ! kill -0 $WATCHER_PID 2>/dev/null; then
+            echo "Source watcher process has stopped unexpectedly"
             exit 1
           fi
-        }
+          
+          CURRENT_LISTENING_COUNT=$(grep -c "Listening for new sources..." watcher.log 2>/dev/null || echo "0")
+          
+          if [ "$CURRENT_LISTENING_COUNT" -gt "$LISTENING_COUNT" ]; then
+            LISTENING_COUNT=$CURRENT_LISTENING_COUNT
+            echo "Found 'Listening for new sources...' occurrence #$LISTENING_COUNT"
+            
+            if [ "$LISTENING_COUNT" -ge 2 ]; then
+              echo "Reached 2nd 'Listening for new sources...' - stopping source watcher"
+              SUCCESS=true
+              break
+            fi
+          fi
+          
+          if grep -q "ERROR" watcher.log; then
+            echo "Error detected in source watcher logs"
+            kill $WATCHER_PID 2>/dev/null || true
+            exit 1
+          fi
+          
+          sleep 2
+          ELAPSED=$((ELAPSED + 2))
+          
+          if [ $((ELAPSED % 30)) -eq 0 ]; then
+            echo "Waiting... (${ELAPSED}s/${TIMEOUT}s) - Found $LISTENING_COUNT 'Listening for new sources...'"
+          fi
+        done
+        
+        # Arrêter le processus source watcher
+        kill $WATCHER_PID 2>/dev/null || true
+        wait $WATCHER_PID 2>/dev/null || true
+        
+        if [ "$SUCCESS" = false ]; then
+          echo "Timeout reached (5 minutes) without reaching 2nd 'Listening for new sources...' log"
+          echo "Found $LISTENING_COUNT occurrences"
+          exit 1
+        fi
+        
+        echo "Source watcher test completed successfully"
 
         
     - name: Show container logs (on failure)
