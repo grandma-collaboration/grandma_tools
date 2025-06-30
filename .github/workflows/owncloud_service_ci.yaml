@@ -165,7 +165,6 @@ jobs:
           fi
         done
         
-        # Arrêter le processus source watcher
         kill $WATCHER_PID 2>/dev/null || true
         wait $WATCHER_PID 2>/dev/null || true
         
@@ -177,8 +176,14 @@ jobs:
         
         echo "Source watcher test completed successfully"
 
-        
-    - name: Show container logs (on failure)
+    - name: Run folder structure tests
+      run: |
+        cd owncloud_service/tests
+        echo "Running pytest to verify folder structure created by source_watcher..."
+        python -m pytest test_integration_owncloud.py -v
+        echo "Folder structure tests completed"
+  
+    - name: Show container logs
       if: always()
       run: |
         echo "Collecting container logs for debugging..."
