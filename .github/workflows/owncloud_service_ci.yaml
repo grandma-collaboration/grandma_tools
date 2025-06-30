@@ -67,9 +67,7 @@ jobs:
         cd skyportal
         echo "Extracting SkyPortal token..."
         SKYPORTAL_TOKEN=$(docker exec skyportal-web cat .tokens.yaml | grep "INITIAL_ADMIN:" | cut -d':' -f2 | tr -d ' ')
-        echo $SKYPORTAL_TOKEN
 
-        
         if [ -z "$SKYPORTAL_TOKEN" ]; then
           echo "Failed to extract SkyPortal token"
           exit 1
