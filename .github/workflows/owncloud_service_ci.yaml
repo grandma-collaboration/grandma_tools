@@ -179,15 +179,26 @@ jobs:
 
         
     - name: Show container logs (on failure)
-      if: failure()
+      if: always()
       run: |
-        echo "Container logs for debugging:"
-        echo "=== OwnCloud logs ==="
-        docker logs owncloud_server || true
-        echo "=== SkyPortal web logs ==="
-        docker logs skyportal-web || true
-        echo "=== Docker containers status ==="
-        docker ps -a
+        echo "Collecting container logs for debugging..."
+        mkdir -p debug_logs
+        
+        docker logs owncloud_server > debug_logs/owncloud.log 2>&1 || echo "Failed to get owncloud logs" > debug_logs/owncloud.log
+        docker logs skyportal-web > debug_logs/skyportal.log 2>&1 || echo "Failed to get skyportal logs" > debug_logs/skyportal.log  
+        docker logs postgres16 > debug_logs/postgres.log 2>&1 || echo "Failed to get postgres logs" > debug_logs/postgres.log
+        docker ps -a > debug_logs/containers_status.txt 2>&1 || echo "Failed to get containers status" > debug_logs/containers_status.txt
+        
+        echo "Debug logs collected and will be saved to artifacts"
+        
+    - name: Save debug artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-logs
+        path: |
+          debug_logs/
+        retention-days: 7
           
     - name: Cleanup
       if: always()
