@@ -1,0 +1,207 @@
+name: GRANDMA Tools CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+env:
+  OWNCLOUD_BASE_URL: "http://localhost:8080/remote.php/dav/files"
+  OWNCLOUD_USERNAME: "admin"
+  OWNCLOUD_TOKEN: "admin"
+  OWNCLOUD_USER_ID: "admin"
+
+  SAVE_PATH: "Candidates/Skyportal"
+  POLL_INTERVAL: "10"
+  GROUP_IDS: "1"
+  SOURCE_TAG: ""
+  USE_BASE_TELESCOPE_LIST: "true"
+  TELESCOPE_LIST: "TEST-TEL1,TEST-TEL2"
+  START_TIME: "2017-06-01T00:00:00Z"
+  SLACK_BOT_TOKEN: ""
+  SLACK_SERVICE_NAME: "owncloud-folder-service-test"
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Checkout SkyPortal
+      uses: actions/checkout@v4
+      with:
+        repository: skyportal/skyportal
+        path: skyportal
+        
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Build SkyPortal Docker images
+      run: |
+        cd skyportal
+        echo "Building SkyPortal Docker images..."
+        make docker-local
+        echo "SkyPortal images built successfully"
+        
+    - name: Start all services
+      run: |
+        cd owncloud_service
+        echo "Starting services..."
+        docker compose up -d
+        
+    - name: Initialize SkyPortal database
+      run: |
+        cd skyportal
+        echo "Creating database tables..."
+        docker exec skyportal-web bash -c 'source /skyportal_env/bin/activate && FLAGS="--config=config.yaml" make db_create_tables'
+        
+        echo "Loading demo data..."
+        docker exec skyportal-web bash -c 'source /skyportal_env/bin/activate && FLAGS="--create_tables --config=config.yaml" make load_demo_data'
+        echo "Database initialized successfully"
+        
+    - name: Extract SkyPortal token
+      id: extract_token
+      run: |
+        cd skyportal
+        echo "Extracting SkyPortal token..."
+        SKYPORTAL_TOKEN=$(docker exec skyportal-web cat .tokens.yaml | grep "INITIAL_ADMIN:" | cut -d':' -f2 | tr -d ' ')
+
+        if [ -z "$SKYPORTAL_TOKEN" ]; then
+          echo "Failed to extract SkyPortal token"
+          exit 1
+        fi
+        
+        echo "SKYPORTAL_TOKEN=$SKYPORTAL_TOKEN" >> $GITHUB_OUTPUT
+        
+    - name: Create test environment file
+      run: |
+        cd owncloud_service
+        echo "Creating test environment file."
+        cat > .env << EOF
+        # OwnCloud Configuration
+        OWNCLOUD_BASE_URL=${{ env.OWNCLOUD_BASE_URL }}
+        OWNCLOUD_USERNAME=${{ env.OWNCLOUD_USERNAME }}
+        OWNCLOUD_TOKEN=${{ env.OWNCLOUD_TOKEN }}
+        OWNCLOUD_USER_ID=${{ env.OWNCLOUD_USER_ID }}
+        
+        # SkyPortal Configuration
+        SKYPORTAL_URL=http://localhost:9000
+        SKYPORTAL_TOKEN=${{ steps.extract_token.outputs.SKYPORTAL_TOKEN }}
+        
+        # Application Settings
+        SAVE_PATH=${{ env.SAVE_PATH }}
+        POLL_INTERVAL=${{ env.POLL_INTERVAL }}
+        GROUP_IDS=${{ env.GROUP_IDS }}
+        SOURCE_TAG=${{ env.SOURCE_TAG }}
+        USE_BASE_TELESCOPE_LIST=${{ env.USE_BASE_TELESCOPE_LIST }}
+        TELESCOPE_LIST=${{ env.TELESCOPE_LIST }}
+        START_TIME=${{ env.START_TIME }}
+        
+        # Slack Configuration
+        SLACK_BOT_TOKEN=${{ env.SLACK_BOT_TOKEN }}
+        SLACK_SERVICE_NAME=${{ env.SLACK_SERVICE_NAME }}
+        EOF
+        echo "Environment file created"
+        
+    - name: Install python dependencies
+      run: |
+        cd owncloud_service
+        echo "Installing source watcher dependencies."
+        pip install -r requirements.txt
+        
+    - name: Test source watcher startup
+      run: |
+        cd owncloud_service
+        echo "Testing source watcher startup (waiting for 2nd 'Listening for new sources...' or 5min timeout)..."
+        
+        python source_watcher.py --env-file .env > watcher.log 2>&1 &
+        WATCHER_PID=$!
+        
+        echo "Source watcher started with PID: $WATCHER_PID"
+        
+        TIMEOUT=300
+        ELAPSED=0
+        LISTENING_COUNT=0
+        SUCCESS=false
+        
+        while [ $ELAPSED -lt $TIMEOUT ]; do
+          if ! kill -0 $WATCHER_PID 2>/dev/null; then
+            echo "Source watcher process has stopped unexpectedly"
+            exit 1
+          fi
+          
+          CURRENT_LISTENING_COUNT=$(grep -c "Listening for new sources..." watcher.log 2>/dev/null || echo "0")
+          
+          if [ "$CURRENT_LISTENING_COUNT" -gt "$LISTENING_COUNT" ]; then
+            LISTENING_COUNT=$CURRENT_LISTENING_COUNT
+            echo "Found 'Listening for new sources...' occurrence #$LISTENING_COUNT"
+            
+            if [ "$LISTENING_COUNT" -ge 2 ]; then
+              echo "Reached 2nd 'Listening for new sources...' - stopping source watcher"
+              SUCCESS=true
+              break
+            fi
+          fi
+          
+          if grep -q "ERROR" watcher.log; then
+            echo "Error detected in source watcher logs"
+            kill $WATCHER_PID 2>/dev/null || true
+            exit 1
+          fi
+          
+          sleep 2
+          ELAPSED=$((ELAPSED + 2))
+          
+          if [ $((ELAPSED % 30)) -eq 0 ]; then
+            echo "Waiting... (${ELAPSED}s/${TIMEOUT}s) - Found $LISTENING_COUNT 'Listening for new sources...'"
+          fi
+        done
+        
+        kill $WATCHER_PID 2>/dev/null || true
+        wait $WATCHER_PID 2>/dev/null || true
+        
+        if [ "$SUCCESS" = false ]; then
+          echo "Timeout reached (5 minutes) without reaching 2nd 'Listening for new sources...' log"
+          echo "Found $LISTENING_COUNT occurrences"
+          exit 1
+        fi
+        
+        echo "Source watcher test completed successfully"
+
+    - name: Run folder structure tests
+      run: |
+        cd owncloud_service/tests
+        echo "Running pytest to verify folder structure created by source_watcher..."
+        python -m pytest test_integration_owncloud.py -v
+        echo "Folder structure tests completed"
+  
+    - name: Show container logs
+      if: always()
+      run: |
+        echo "Collecting container logs for debugging..."
+        mkdir -p debug_logs
+        
+        docker logs owncloud_server > debug_logs/owncloud.log 2>&1 || echo "Failed to get owncloud logs" > debug_logs/owncloud.log
+        docker logs skyportal-web > debug_logs/skyportal.log 2>&1 || echo "Failed to get skyportal logs" > debug_logs/skyportal.log  
+        docker logs postgres16 > debug_logs/postgres.log 2>&1 || echo "Failed to get postgres logs" > debug_logs/postgres.log
+        docker ps -a > debug_logs/containers_status.txt 2>&1 || echo "Failed to get containers status" > debug_logs/containers_status.txt
+        
+        echo "Debug logs collected and will be saved to artifacts"
+        
+    - name: Save debug artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-logs
+        path: |
+          debug_logs/
+        retention-days: 7
+          
+    - name: Cleanup
+      if: always()
+      run: |
+        echo "Cleaning up services..."
+        cd owncloud_service && docker compose down -v || true
+        echo "Cleanup completed"
