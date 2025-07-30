@@ -196,7 +196,7 @@ def create_folder_on_owncloud(base_url: str, folder_name: str) -> bool:
         logger.info("✅ Folder " + folder_name + " created successfully.")
         return True
     elif response.status_code == 405:
-        logger.warning("⚠️ Folder " + folder_name + " already exists.")
+        logger.info("⚠️ Folder " + folder_name + " already exists.")
         return True
     elif response.status_code == 401:
         logger.error("❌ Unauthorized — check your username or password.")
