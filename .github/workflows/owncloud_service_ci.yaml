@@ -13,7 +13,7 @@ env:
 
   SAVE_PATH: "Candidates/Skyportal"
   POLL_INTERVAL: "10"
-  GROUP_IDS: "1"
+  GROUP_IDS: "1,2,3"
   SOURCE_TAG: ""
   USE_BASE_TELESCOPE_LIST: "true"
   TELESCOPE_LIST: "TEST-TEL1,TEST-TEL2"
