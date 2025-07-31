@@ -197,6 +197,7 @@ jobs:
         name: debug-logs
         path: |
           debug_logs/
+          owncloud_service/watcher.log
         retention-days: 7
           
     - name: Cleanup
