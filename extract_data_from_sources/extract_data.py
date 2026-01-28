@@ -35,6 +35,20 @@ group_ids = [int(gid.strip()) for gid in group_ids_str.split(",")]
 saved_after = os.getenv("SAVED_AFTER") or None
 saved_before = os.getenv("SAVED_BEFORE") or None
 
+# Source filters (optional)
+# Classification filter: comma-separated list, matches if source has ANY of the classifications
+classification_filter_str = os.getenv("CLASSIFICATION_FILTER") or None
+classification_filter = (
+    [c.strip().lower() for c in classification_filter_str.split(",") if c.strip()]
+    if classification_filter_str
+    else None
+)
+
+# Comment keyword filter: matches if keyword is found in any comment (case-insensitive)
+comment_keyword = os.getenv("COMMENT_KEYWORD") or None
+if comment_keyword:
+    comment_keyword = comment_keyword.strip().lower()
+
 headers = {"Authorization": f"token {token}"}
 
 max_retries_str = os.getenv("MAX_RETRIES")
@@ -166,6 +180,15 @@ if saved_after or saved_before:
     if saved_before:
         print(f"  - Sources saved before: {saved_before}")
 
+if classification_filter or comment_keyword:
+    print("Source filters active (OR logic - matching either will include the source):")
+    if classification_filter:
+        print(
+            f"  - Classification filter (ANY match): {', '.join(classification_filter)}"
+        )
+    if comment_keyword:
+        print(f"  - Comment keyword filter: '{comment_keyword}'")
+
 for group_id in group_ids:
     print(f"\nProcessing group ID: {group_id}")
 
@@ -173,7 +196,9 @@ for group_id in group_ids:
     params = {
         "group_ids": str(group_id),
         "includeHosts": True,  # Include host galaxy information
-        "includeComments": False,  # Don't need comments
+        "includeComments": bool(
+            comment_keyword
+        ),  # Include comments if filtering by keyword
         "pageNumber": 1,
         "numPerPage": 250,
         "totalMatches": None,
@@ -276,6 +301,31 @@ for group_id in group_ids:
             is_galactic_15 = is_galactic(ra, dec, threshold=15.0)
             is_galactic_20 = is_galactic(ra, dec, threshold=20.0)
 
+            # Apply filters if any are set (OR logic between filters)
+            if classification_filter or comment_keyword:
+                matches_classification = False
+                matches_comment = False
+
+                # Check classification filter (ANY match)
+                if classification_filter:
+                    source_classifications = [c.lower() for c in classification_list]
+                    matches_classification = any(
+                        cf in source_classifications for cf in classification_filter
+                    )
+
+                # Check comment keyword filter
+                if comment_keyword:
+                    comments = s.get("comments", [])
+                    for comment in comments:
+                        text = comment.get("text", "").lower()
+                        if comment_keyword in text:
+                            matches_comment = True
+                            break
+
+                # Skip source if it doesn't match any filter (OR logic)
+                if not matches_classification and not matches_comment:
+                    continue
+
             all_sources.append(
                 {
                     "source_id": source_id,
@@ -308,8 +358,11 @@ for group_id in group_ids:
         params["pageNumber"] += 1
 
 # Create DataFrame and save to CSV
-df_sources = pd.DataFrame(all_sources)
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-filename = f"data_extraction_{timestamp}.csv"
-df_sources.to_csv(filename, index=False)
-print(f"\nSaved {len(all_sources)} sources to {filename}")
+if all_sources:
+    df_sources = pd.DataFrame(all_sources)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"data_extraction_{timestamp}.csv"
+    df_sources.to_csv(filename, index=False)
+    print(f"\nSaved {len(all_sources)} sources to {filename}")
+else:
+    print("\nNo sources found matching the criteria.")

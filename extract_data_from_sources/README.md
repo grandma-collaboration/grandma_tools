@@ -86,6 +86,30 @@ SAVED_AFTER=
 SAVED_BEFORE=
 ```
 
+### 5. Source Filtering
+
+You can filter sources by classification type and/or by keywords in comments:
+
+```bash
+# Filter by classification (comma-separated, matches if source has ANY of the listed classifications)
+CLASSIFICATION_FILTER=Ia,Supernova,Ic-SLSN
+
+# Filter by keyword in comments (case-insensitive)
+COMMENT_KEYWORD=probably sn
+```
+
+**Filter behavior:**
+- **Classification filter**: Uses OR logic - source is included if it has at least one of the specified classifications
+- **Comment keyword filter**: Case-insensitive search in all comment text
+- **Combined filters**: When both are set, sources matching EITHER filter are included (OR logic)
+
+To disable filtering, leave these variables empty:
+
+```bash
+CLASSIFICATION_FILTER=
+COMMENT_KEYWORD=
+```
+
 **Note**: All required environment variables must be set in the `.env` file, or the script will raise an error.
 
 ## Usage
