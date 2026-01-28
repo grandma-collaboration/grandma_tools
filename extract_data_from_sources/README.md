@@ -28,49 +28,65 @@ The script requires:
 
 ## Configuration
 
-Before running the script, you need to configure it in `extract_data.py`:
+The script uses a `.env` file for configuration. Follow these steps to set it up:
 
-### 1. Authentication Token
+### 1. Create .env file
 
-Set your Skyportal API token as an environment variable:
-
-```bash
-export SKYPORTAL_API_TOKEN="your_skyportal_api_token_here"
-```
-
-Or add it to your shell configuration file (`~/.bashrc`, `~/.zshrc`, etc.):
+Copy the example configuration file and edit it with your settings:
 
 ```bash
-echo 'export SKYPORTAL_API_TOKEN="your_skyportal_api_token_here"' >> ~/.bashrc
-source ~/.bashrc
+cp .env.example .env
 ```
 
-To obtain a Skyportal API token:
-1. Log in to your Skyportal instance. Example: https://fritz.science
+### 2. Configure settings in .env
+
+Edit the `.env` file with your configuration:
+
+```bash
+# Required: Your Skyportal API token
+SKYPORTAL_API_TOKEN=your_skyportal_api_token_here
+
+# Required: Skyportal API base URL
+SKYPORTAL_BASE_URL=https://fritz.science/api
+
+# Required: Group IDs to fetch sources from (comma-separated for multiple groups)
+GROUP_IDS=1840
+
+# Optional: Time window filter (ISO 8601 format: YYYY-MM-DDTHH:MM:SS)
+# Leave empty to disable time filtering
+SAVED_AFTER=2025-11-07T13:00:00
+SAVED_BEFORE=2025-12-04T13:00:00
+
+# Required: Maximum number of retries for failed requests
+MAX_RETRIES=3
+
+# Required: Directory for dust map data
+DUSTMAPS_DATA_DIR=/tmp
+```
+
+**To obtain a Skyportal API token:**
+1. Log in to your Skyportal instance (e.g., https://fritz.science)
 2. Go to your profile settings
 3. Generate an API token
 
-**Note**: The script will raise an error if `SKYPORTAL_API_TOKEN` is not set.
+### 3. Multiple Group IDs
 
-### 2. Group IDs
+To fetch from multiple groups, separate IDs with commas:
 
-Specify the group IDs you want to fetch sources from:
-
-```python
-group_ids = [1840]  # Replace with your actual group IDs
+```bash
+GROUP_IDS=1840,2050,3100
 ```
 
-You can add multiple group IDs:
+### 4. Time Window Filtering
 
-```python
-group_ids = [1840, 2050, 3100]
+To disable time filtering, leave `SAVED_AFTER` and `SAVED_BEFORE` empty:
+
+```bash
+SAVED_AFTER=
+SAVED_BEFORE=
 ```
 
-### 3. Optional Configuration
-
-- **Base URL**: Default is `https://fritz.science/api`
-- **Cosmology**: Uses Planck18 by default
-- **Dust map location**: Downloads to `/tmp` by default
+**Note**: All required environment variables must be set in the `.env` file, or the script will raise an error.
 
 ## Usage
 

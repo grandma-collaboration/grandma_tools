@@ -8,25 +8,48 @@ import requests
 from astropy import cosmology
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+from dotenv import load_dotenv
 from dustmaps.config import config
 
-# Configuration
+# Load environment variables from .env file
+load_dotenv()
+
+# Configuration - all variables must be set in .env file
 token = os.getenv("SKYPORTAL_API_TOKEN")
 if not token:
     raise ValueError("SKYPORTAL_API_TOKEN environment variable is not set")
-base_url = "https://fritz.science/api"
+
+base_url = os.getenv("SKYPORTAL_BASE_URL")
+if not base_url:
+    raise ValueError("SKYPORTAL_BASE_URL environment variable is not set")
 
 # List of group IDs to fetch sources from
-group_ids = [1840]  # Replace with your actual group IDs
+group_ids_str = os.getenv("GROUP_IDS")
+if not group_ids_str:
+    raise ValueError("GROUP_IDS environment variable is not set")
+group_ids = [int(gid.strip()) for gid in group_ids_str.split(",")]
+
+# Time window filter for when sources were saved to the group
+# Format: "YYYY-MM-DDTHH:MM:SS" (ISO 8601 format)
+# Set to empty string in .env to disable filtering
+saved_after = os.getenv("SAVED_AFTER") or None
+saved_before = os.getenv("SAVED_BEFORE") or None
 
 headers = {"Authorization": f"token {token}"}
-max_retries = 3
+
+max_retries_str = os.getenv("MAX_RETRIES")
+if not max_retries_str:
+    raise ValueError("MAX_RETRIES environment variable is not set")
+max_retries = int(max_retries_str)
 
 # Setup cosmology (using Planck18 as default, matching common SkyPortal config)
 cosmo = cosmology.Planck18
 
 # Setup dustmaps for E(B-V) calculation
-config["data_dir"] = "/tmp"
+dustmaps_data_dir = os.getenv("DUSTMAPS_DATA_DIR")
+if not dustmaps_data_dir:
+    raise ValueError("DUSTMAPS_DATA_DIR environment variable is not set")
+config["data_dir"] = dustmaps_data_dir
 required_files = ["sfd/SFD_dust_4096_ngp.fits", "sfd/SFD_dust_4096_sgp.fits"]
 if any(
     not os.path.isfile(os.path.join(config["data_dir"], required_file))
@@ -136,6 +159,12 @@ def is_galactic(ra, dec, threshold=15.0):
 all_sources = []
 
 print(f"Fetching sources from group IDs: {group_ids}")
+if saved_after or saved_before:
+    print("Time window filter active:")
+    if saved_after:
+        print(f"  - Sources saved after: {saved_after}")
+    if saved_before:
+        print(f"  - Sources saved before: {saved_before}")
 
 for group_id in group_ids:
     print(f"\nProcessing group ID: {group_id}")
@@ -151,6 +180,11 @@ for group_id in group_ids:
         "useCache": True,
         "queryID": None,
     }
+
+    if saved_after is not None:
+        params["startDate"] = saved_after
+    if saved_before is not None:
+        params["endDate"] = saved_before
 
     retrieved = 0
     retries_remaining = max_retries
