@@ -1,0 +1,29 @@
+[Unit]
+Description=SkyPortal Source Watcher - OwnCloud Folder Service
+Documentation=file:///opt/skyportal-source-watcher/README.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/skyportal-source-watcher/grandma_tools/owncloud_service
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/skyportal-source-watcher/grandma_tools/owncloud_service/venv/bin/python source_watcher.py --env-file /opt/skyportal-source-watcher/.env
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=10
+MemoryLimit=512M
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=skyportal-source-watcher
+
+[Install]
+WantedBy=multi-user.target
