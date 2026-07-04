@@ -4,14 +4,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import traceback
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
+import json
 
 import requests
 from config import get_required_env, load_env_file
 from requests.auth import HTTPBasicAuth
 import logging
 logging.getLogger().setLevel(logging.DEBUG)
-import json
 
 # TODO
 # Do we need to continue where left off based on comments? Maybe just start listening from now() and not care about past?
@@ -28,6 +28,9 @@ seen_comments: Dict[str, Set[str]] = dict()  # Track seen comments (by source + 
 jobformat_version = 0.1
 @dataclass
 class PipelineJob:
+    """
+    Data structure for saving the state of a pipeline job.
+    """
     comment: str = ""
     source_id: str = ""
     job_id: int = 0  # Local for the source
@@ -85,6 +88,10 @@ def str_to_varsel_str(message: str) -> str:
 
 
 def varsel_str_to_str(invisible_chars: str) -> str:
+    """
+    Decode a string from a string of variation selectors (invisible unicode characters that take up 0 pixels).
+    Each two characters in the input string are 4 bytes in total and they encode 1 byte of the output string. Therefore the length of the input must be even.
+    """
     bytelist = []
     for i in range(0, len(invisible_chars), 2):
         bytelist.append(
@@ -174,7 +181,7 @@ def get_new_comments(
 
 def comment_back(job: PipelineJob, message: str) -> None:
     """
-    Post a comment to report progress of the job
+    Post a comment to SkyPortal to report the progress of the job.
     """
     response = requests.post(
         f"{INSTANCE_URL}/api/sources/{job.source_id}/comments",
@@ -189,7 +196,7 @@ def comment_back(job: PipelineJob, message: str) -> None:
 
 def job_from_comment(comment: str) -> Optional[PipelineJob]:
     """
-    Parse the hidden serialized job from a bot comment
+    Parse the hidden serialized job from a bot comment, if any.
     """
     text1 = comment.split(":")
     if len(text1) < 2:
@@ -200,12 +207,15 @@ def job_from_comment(comment: str) -> Optional[PipelineJob]:
     text = varsel_str_to_str(text2)
     try:
         return PipelineJob.deserialize(text)
-    except Exception as e:
+    except Exception:
         traceback.print_exc()
         return None
 
 
 def owncloud_exists(path: str) -> bool:
+    """
+    Check if a file or folder exists and is accessible in OwnCloud.
+    """
     check_url = f"{BASE_URL}/remote.php/dav/files/{OWNCLOUD_USER_ID}/{SAVE_PATH}/{path}"
     response = requests.request(
         "PROPFIND", check_url, auth=HTTPBasicAuth(OWNCLOUD_USERNAME, OWNCLOUD_TOKEN), headers={"Depth":"0"}
@@ -260,6 +270,9 @@ def stdweb_make_task(job: PipelineJob) -> int:
 
 
 def stdweb_start_task(job: PipelineJob, files: List[str]) -> None:
+    """
+    Set config of the task on StdWeb an start it.
+    """
     response = requests.request(
         "POST", f"{STDWEB_URL}/api/tasks/{job.stdweb_id}/process/", 
         headers={"Authorization": f"Token {STDWEB_TOKEN}"},
@@ -282,7 +295,7 @@ def stdweb_start_task(job: PipelineJob, files: List[str]) -> None:
 
 def stdweb_task_status(job: PipelineJob) -> str:
     """
-    Queries StdWeb task status
+    Queries StdWeb task status.
     Returns task status as string.
     """
     response = requests.request(
@@ -308,7 +321,17 @@ def transfer_file_owncloud_to_stdweb(owncloud_path: str, stdweb_task_id: int) ->
 
 def pipeline_tick(job: PipelineJob) -> bool:
     """
-    Main function that runs for all jobs. Broken up into pieces to allow waiting for somethign to happen asynchronously (and continuing ).
+    Main function that runs for all jobs. Broken up into pieces to allow waiting for something to happen asynchronously (and continuing from checkpoints even after restarting python).
+
+    Flow (labelled by job.stage):
+    1. Parse the arguments and return error if necessary
+    2. Check if the requested folder existst in OwnCloud and contains .fits files
+    3. Create a new task on StdWeb
+    4. Upload .fits files from OwnCloud to StdWeb
+    5. Start the StdWeb task
+    6. Wait until the task state has "failed" or is "photometry_done"
+    1000. Done
+    1001 = Error caught
 
     Returns whether the job has finished
     """
@@ -350,10 +373,9 @@ def pipeline_tick(job: PipelineJob) -> bool:
             # This is a plain command, expect a telescope name next
             if len(argv) < 2:
                 job.stage = 1001
-                comment_back(job, "Error: Please provide the name of the telescope to stack.")
+                comment_back(job, "Error: Please provide the name of the instrument to stack.")
                 return True
-            telescope = argv[1]
-            job.telescope = telescope
+            job.telescope = argv[1]
             job.stage = 2
         folder = f"{job.source_id}/{job.telescope}"
         if job.stage <= 2:
@@ -386,7 +408,7 @@ def pipeline_tick(job: PipelineJob) -> bool:
             files_to_stack = list(map(lambda f: f"tasks/{job.stdweb_id}/{f.split("/")[-1]}", fits_files))
             stdweb_start_task(job, files_to_stack)
             job.stage = 6
-            comment_back(job, f"Task started.")
+            comment_back(job, "Task started.")
             return False
         # Wait for the task to finish
         if job.stage <= 6:
@@ -412,6 +434,9 @@ def pipeline_tick(job: PipelineJob) -> bool:
     return True
 
 def pipeline_tick_all() -> None:
+    """
+    Run all tasks in the pipeline and remove the ones that have finished.
+    """
     i = 0
     while i < len(pipeline):
         job = pipeline[i]
@@ -422,10 +447,9 @@ def pipeline_tick_all() -> None:
 
 def main_loop(start_time: datetime) -> None:
     """
-    Main monitoring loop that watches for new sources and creates folders.
+    Main monitoring loop that watches for new comments, creates and runs jobs.
 
-    Continuously polls SkyPortal for new sources and creates corresponding folder
-    structures on ownCloud.
+    Continuously polls SkyPortal and runs active pipeline jobs.
 
     Args:
         start_time: Datetime to start monitoring from
@@ -515,12 +539,12 @@ if __name__ == "__main__":
         SKYPORTAL_GROUP_IDS_FILTER = [
             int(x.strip()) for x in os.getenv("GROUP_IDS", "").split(",") if x.strip()
         ]
-        SKYPORTAL_COMMAND=get_required_env("SKYPORTAL_COMMAND")
+        SKYPORTAL_COMMAND=os.getenv("SKYPORTAL_COMMAND", "@Process")
 
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
         logger.error(
-            "Required variables: OWNCLOUD_USERNAME, OWNCLOUD_TOKEN, OWNCLOUD_USER_ID, SKYPORTAL_TOKEN"
+            "Required variables: OWNCLOUD_USERNAME, OWNCLOUD_TOKEN, OWNCLOUD_USER_ID, SKYPORTAL_TOKEN, STDWEB_TOKEN"
         )
         exit(1)
     header = {"Authorization": f"token {SKYPORTAL_TOKEN}"}
