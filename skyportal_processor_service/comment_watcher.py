@@ -44,6 +44,7 @@ class PipelineJob:
     author: str = ""
     telescope: str = ""
     stdweb_id: int = -1
+    do_stacking: bool = False
     version: float = jobformat_version
 
     # Dict is very inefficient, but back-compatible
@@ -58,6 +59,7 @@ class PipelineJob:
             "author": self.author,
             "telescope": self.telescope,
             "stdweb_id": self.stdweb_id,
+            "do_stacking": self.do_stacking,
             "version": self.version,
             })
 
@@ -74,6 +76,7 @@ class PipelineJob:
             author=fields.get("author",""),
             telescope=fields.get("telescope", ""),
             stdweb_id=fields.get("stdweb_id", -1),
+            do_stacking=fields.get("do_stacking", False),
             version=fields.get("version", 0.0),
         )
 pipeline: List[PipelineJob] = []
@@ -273,20 +276,22 @@ def stdweb_start_task(job: PipelineJob, files: List[str]) -> None:
     """
     Set config of the task on StdWeb an start it.
     """
-    response = requests.request(
-        "POST", f"{STDWEB_URL}/api/tasks/{job.stdweb_id}/process/", 
-        headers={"Authorization": f"Token {STDWEB_TOKEN}"},
-        json={
-            "steps": [
-                "stack", 
+    steps = [
                 "inspect", 
                 "photometry", 
                 # "simple_transients", 
                 # "subtraction",
-                ],
+            ]
+    if job.do_stacking:
+        steps.insert(0, "stack")
+    response = requests.request(
+        "POST", f"{STDWEB_URL}/api/tasks/{job.stdweb_id}/process/",
+        headers={"Authorization": f"Token {STDWEB_TOKEN}"},
+        json={
+            "steps": steps,
             "config": {
                 "stack_filenames": files,
-                "targets": [{"ra": job.ra, "dec": job.dec}],
+                "target": f"{job.ra:.15f},{job.dec:.15f}",
             }
         }
     )
@@ -305,16 +310,17 @@ def stdweb_task_status(job: PipelineJob) -> str:
     response.raise_for_status()
     return response.json()["state"]
 
-def transfer_file_owncloud_to_stdweb(owncloud_path: str, stdweb_task_id: int) -> None:
+def transfer_file_owncloud_to_stdweb(owncloud_path: str, stdweb_task_id: int, stdweb_filename: Optional[str] = None) -> None:
     response = requests.request(
         "GET", BASE_URL+owncloud_path, auth=HTTPBasicAuth(OWNCLOUD_USERNAME, OWNCLOUD_TOKEN)
     )
     response.raise_for_status()
-    filename = owncloud_path.split("/")[-1]
+    if stdweb_filename is None:
+        stdweb_filename = owncloud_path.split("/")[-1]
     response2 = requests.request(
-        "POST", f"{STDWEB_URL}/api/tasks/{stdweb_task_id}/files/{filename}",
+        "POST", f"{STDWEB_URL}/api/tasks/{stdweb_task_id}/files/{stdweb_filename}",
         headers={"Authorization": f"Token {STDWEB_TOKEN}"},
-        files={"file": (filename, response.content, "application/fits")}
+        files={"file": (stdweb_filename, response.content, "application/fits")}
     )
     response2.raise_for_status()
 
@@ -386,7 +392,8 @@ def pipeline_tick(job: PipelineJob) -> bool:
         # The file paths are needed for a couple of stages
         if job.stage <= 5:
             files, files_short = owncloud_ls(folder)
-            fits_files = [f for f in files if f[-len(".fits"):] == ".fits"]
+            fits_files = [f for f in files if f.endswith(".fits") or f.endswith(".fit")]
+            job.do_stacking = len(fits_files) > 1
         if job.stage <= 2:
             if not fits_files:
                 job.stage = 1001
@@ -400,8 +407,12 @@ def pipeline_tick(job: PipelineJob) -> bool:
             job.stage = 4
             comment_back(job, f"{STDWEB_URL}/tasks/{job.stdweb_id}")
         if job.stage <= 4:
-            for path in fits_files:
-                transfer_file_owncloud_to_stdweb(path, job.stdweb_id)
+            if job.do_stacking:
+                for path in fits_files:
+                    transfer_file_owncloud_to_stdweb(path, job.stdweb_id)
+            else:
+                # Already checked that there is at least one file in stage 2
+                transfer_file_owncloud_to_stdweb(fits_files[0], job.stdweb_id, "image.fits")
             job.stage = 5
             comment_back(job, f"{len(fits_files)} files uploaded.")
         if job.stage <= 5:
