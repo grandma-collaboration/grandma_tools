@@ -325,6 +325,10 @@ def transfer_file_owncloud_to_stdweb(owncloud_path: str, stdweb_task_id: int, st
     response2.raise_for_status()
 
 
+def stdweb_task_name(job, filename) -> str:
+    return f"{job.source_id} {filename}"
+
+
 def pipeline_tick(job: PipelineJob) -> bool:
     """
     Main function that runs for all jobs. Broken up into pieces to allow waiting for something to happen asynchronously (and continuing from checkpoints even after restarting python).
@@ -545,6 +549,7 @@ if __name__ == "__main__":
 
 
         SAVE_PATH = os.getenv("SAVE_PATH", "Candidates/Skyportal")
+        STDWEB_SAVE_PATH = os.getenv("STDWEB_SAVE_PATH", "Candidates/Skyportal")
         SOURCE_TAG = os.getenv("SOURCE_TAG", "")
         POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))
         SKYPORTAL_GROUP_IDS_FILTER = [
